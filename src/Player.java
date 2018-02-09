@@ -1,9 +1,14 @@
 
-import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadLocalRandom;
-import java.io.*;
-import java.math.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Random;
+import java.util.Scanner;
+import java.util.Set;
 
 class Player {
 
@@ -30,6 +35,7 @@ class Player {
 				building.pruneBuilding(oldPos, newPos, bombDir);
 			}
 			nextPos = building.getNextPosition(oldPos, newPos, bombDir);
+			System.err.println("Final Position : " + nextPos);
 
 			System.out.println(String.format("%s %s", nextPos.x, nextPos.y));
 			oldPos = newPos;
@@ -67,6 +73,11 @@ class Player {
 			return pos.x == this.x && pos.y == this.y;
 		}
 
+		@Override
+		public int hashCode() {
+			return this.x * 17 + this.y * 31 + 73;
+		}
+
 		public Position getSymmetricBy(Position middlePos) {
 			return new Position(2 * middlePos.x - this.x, 2 * middlePos.y - this.y);
 		}
@@ -93,7 +104,8 @@ class Player {
 		List<LineDelimitation> lines = new ArrayList<>();
 
 		List<Position> vertices;
-		LinkedList<Position> edges = new LinkedList<>();
+		LinkedList<Position> edges;
+		Set<Position> visitedPositions = new HashSet<>();
 
 		public Building(int width, int height) {
 			this.width = width;
@@ -143,10 +155,11 @@ class Player {
 		 * @return
 		 */
 		public Position getNextPosition(Position oldPosition, Position newPos, String bombDir) {
+			visitedPositions.add(newPos);
 			if ("COLDER".equals(bombDir)) {
-				return getNextPosition(oldPosition);
+				return getNextPosition(oldPosition, 0, 0);
 			} else {
-				return getNextPosition(newPos);
+				return getNextPosition(newPos, 0, 0);
 			}
 		}
 
@@ -156,23 +169,41 @@ class Player {
 		 * @param newPos
 		 * @return
 		 */
-		private Position getNextPosition(Position previousPosition) {
-			int randomX = new Random().nextInt(width);
-			int randomY = new Random().nextInt(height);
+		private Position getNextPosition(Position previousPosition, int weight, int iteration) {
 			Position center = getCenter();
 			System.err.println("Previous position : " + previousPosition);
 			System.err.println("Center : " + center);
-			
-			Position testPosition = null;
-			int weight = 1;
-			System.err.println("Comparing if test position is ok for the remaining building");
-			do {
-				weight += 1;
-				testPosition = getBarycentre(Arrays.asList(center, previousPosition), Arrays.asList(weight, -1));
-				System.err.println("Test position : " + testPosition);
-			} while (!isInBuilding(testPosition));
-			System.err.println("Final Position : " + testPosition);
 
+			Position testPosition = null;
+			System.err.println("Comparing if test position is ok for the remaining building");
+			testPosition = getBarycentre(Arrays.asList(center, previousPosition), Arrays.asList(2, -1));
+			
+//				testPosition = center;
+				System.err.println("Test position : " + testPosition);
+				int randomX = new Random().nextInt(2*weight + 1) - weight;
+				int randomY = new Random().nextInt(2*weight + 1) - weight;
+				testPosition = testPosition.addCoordinates(randomX, randomY);
+				System.err.println("Test position : " + testPosition);
+				
+			if (!isInBuilding(testPosition) || visitedPositions.contains(testPosition)) {
+				iteration += 1;
+				if (iteration == (2*weight +1)*(2*weight +1)) {
+					weight += 1; 
+				}
+				return getNextPosition(previousPosition, weight, iteration);
+			}
+//			testPosition = center;
+
+			//System.err.println("visitedPositions : " + visitedPositions);
+
+//			while (visitedPositions.contains(testPosition)) {
+//				int randomX = new Random().nextInt(3) - 1;
+//				int randomY = new Random().nextInt(3) - 1;
+//				testPosition = testPosition.addCoordinates(randomX, randomY);
+//				System.err.println("new testPosition since already visited: " + testPosition);
+//
+//			}
+			
 			return testPosition;
 		}
 
@@ -188,7 +219,7 @@ class Player {
 				sumY += weight * pos.y;
 				sumWeight += weight;
 			}
-//			System.err.println(String.format("sumX = %s ; sumY = %s ; sumWeight = %s ", sumX, sumY, sumWeight));
+			//			System.err.println(String.format("sumX = %s ; sumY = %s ; sumWeight = %s ", sumX, sumY, sumWeight));
 			return Position.of(sumX / sumWeight, sumY / sumWeight);
 		}
 
@@ -201,6 +232,9 @@ class Player {
 		}
 
 		private boolean isInBuilding(Position pos) {
+			if (pos.x < 0 || pos.y < 0 || pos.x >= width || pos.y >= height) {
+				return false;
+			}
 			for (LineDelimitation line : lines) {
 				if (!line.isPositionInDelimitation(pos)) {
 					return false;
@@ -211,7 +245,7 @@ class Player {
 
 		public void pruneBuilding(Position oldPosition, Position newPosition, String bombDir) {
 			if (oldPosition.equals(newPosition)) {
-				throw new IllegalArgumentException();
+				throw new SamePositionException();//"New position same as old position : infinity loop"
 			}
 			try {
 				LineDelimitation line = new LineDelimitation(oldPosition, newPosition, bombDir);
@@ -224,46 +258,10 @@ class Player {
 				addNewEdges(line, indexOfNewVertice);
 				System.err.println("New edges : " + edges);
 				System.err.println("indexOfNewVertice : " + indexOfNewVertice);
+			} catch (NoEdgeRemovedException e) {
+				System.err.println(e);
 			} catch (Exception e) {
 				System.err.println(e);
-			}
-		}
-
-		private void addNewEdges(LineDelimitation line, int indexOfNewVertice) {
-			int previousIndex = getpreviousIndexOfNewVertice(indexOfNewVertice);
-			for (int x = edges.get(indexOfNewVertice).x - 1; x > edges.get(previousIndex).x; x--) {
-				Position pos = Position.of(x, line.getYFromX(x));
-				edges.add(indexOfNewVertice, pos);
-			}
-		}
-
-		private int getpreviousIndexOfNewVertice(int indexOfNewVertice) {
-			if (indexOfNewVertice == 0) {
-				return edges.size() - 1;
-			} else {
-				return indexOfNewVertice - 1;
-			}
-		}
-
-		private void addNewVertices(int indexOfNewVertice) {
-			int previousIndex = getpreviousIndexOfNewVertice(indexOfNewVertice);
-			vertices.add(edges.get(indexOfNewVertice));
-			vertices.add(edges.get(previousIndex));
-			cleanVertices();
-		}
-
-		private void cleanVertices() {
-			Iterator<Position> iter = vertices.iterator();
-			Position previousPos = iter.next();
-			System.err.println("previousPos : " + previousPos);
-			while (iter.hasNext()) {
-				Position newPos = iter.next();
-				System.err.println("newPos : " + newPos);
-				if (newPos.equals(previousPos)) {
-					iter.remove();
-				} 
-				previousPos = newPos;
-				// Check si y a pas un pb en cas de remove sur l'affectation previousPos
 			}
 		}
 
@@ -275,7 +273,6 @@ class Player {
 					iter.remove();
 				}
 			}
-
 		}
 
 		/**
@@ -286,9 +283,11 @@ class Player {
 		 * the new edges are added between those two.
 		 * 
 		 * @param line
+		 * @throws NoEdgeRemovedException
 		 */
-		private int removeObsoleteEdges(LineDelimitation line) {
+		private int removeObsoleteEdges(LineDelimitation line) throws NoEdgeRemovedException {
 			boolean isLastPositionInDelimitation = line.isPositionInDelimitation(edges.getFirst());
+			boolean isItemRemoved = false;
 			Integer indexOfNewVertice = null;
 			ListIterator<Position> iter = edges.listIterator(0);
 			while (iter.hasNext()) {
@@ -296,16 +295,72 @@ class Player {
 				if (!line.isPositionInDelimitation(pos)) {
 					isLastPositionInDelimitation = false;
 					iter.remove();
+					isItemRemoved = true;
 				} else if (indexOfNewVertice == null && !isLastPositionInDelimitation) {
 					indexOfNewVertice = iter.previousIndex();
 				}
 			}
 			if (indexOfNewVertice == null) {
-				indexOfNewVertice = 0;
+				if (isItemRemoved) {
+					indexOfNewVertice = 0;
+				} else {
+					throw new NoEdgeRemovedException();
+				}
 			}
 			return indexOfNewVertice;
 		}
 
+		private void addNewVertices(int indexOfNewVertice) {
+			int previousIndex = getPreviousIndexOfNewVertice(indexOfNewVertice);
+			vertices.add(edges.get(indexOfNewVertice));
+			vertices.add(edges.get(previousIndex));
+			cleanVertices();
+		}
+
+		private int getPreviousIndexOfNewVertice(int indexOfNewVertice) {
+			if (indexOfNewVertice == 0) {
+				return edges.size() - 1;
+			} else {
+				return indexOfNewVertice - 1;
+			}
+		}
+
+		private void addNewEdges(LineDelimitation line, int indexOfNewVertice) {
+			int previousIndex = getPreviousIndexOfNewVertice(indexOfNewVertice);
+			int indexX = edges.get(indexOfNewVertice).x;
+			int previousIndexX = edges.get(previousIndex).x;
+			if (indexX > previousIndexX) {
+				for (int x = indexX - 1; x > previousIndexX; x--) {
+					Position pos = Position.of(x, line.getYFromX(x));
+					edges.add(indexOfNewVertice, pos);
+				}
+			} else {
+				for (int x = indexX + 1; x < previousIndexX; x++) {
+					Position pos = Position.of(x, line.getYFromX(x));
+					edges.add(indexOfNewVertice, pos);
+				}
+			}
+		}
+
+		private void cleanVertices() {
+			Iterator<Position> iter = vertices.iterator();
+			Position previousPos = iter.next();
+			while (iter.hasNext()) {
+				Position newPos = iter.next();
+				if (newPos.equals(previousPos)) {
+					iter.remove();
+				}
+				previousPos = newPos;
+				// Check si y a pas un pb en cas de remove sur l'affectation previousPos
+			}
+		}
+
+	}
+
+	public static class NoEdgeRemovedException extends Exception {
+	}
+
+	public static class SamePositionException extends RuntimeException {
 	}
 
 	/**
